@@ -607,7 +607,7 @@ function str_replace_all(str: string, search: string, replace: string) {
 const t_typing_template =
     `/*
  * 当前代码由 CRIK 工具自动生成
- * CRIK: http://git.kuzhengame.com/KZTools/Crik
+ * CRIK: https://github.com/looping1984/CRIK
  */
 
 {item_typing}
