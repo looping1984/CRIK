@@ -350,11 +350,12 @@ export abstract class crTSPHelper {
         return undefined;
     }
     static parseDecorators(n: ts.Node) {
-        if (!n.decorators) {
+        let dss = ts.canHaveDecorators(n) ? ts.getDecorators(n) : undefined;
+        if (!dss) {
             return undefined;
         }
         let ds: tsmDecorator[] = [];
-        for (let d of n.decorators) {
+        for (let d of dss) {
             let pd = crTSPHelper.parseOnDecorator(d);
             pd && (ds.push(pd));
         }
