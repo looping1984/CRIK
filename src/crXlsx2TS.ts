@@ -4,6 +4,7 @@ import { DeepReadonly, crUtil, is_null, not_null } from "./crUtil";
 import { crXlsx2Json } from "./crXlsx2Json";
 import { crFS } from "./crFS";
 import { js_beautify } from "js-beautify";
+import { crCache } from "crCache";
 
 export type crXTSPrimitiveType = 'string' | 'number' | 'boolean' | 'any' | 'error';
 export type crXTSMemberType = crXTSPrimitiveType | ({ fd: string, type: crXTSPrimitiveType }[]);
@@ -140,11 +141,30 @@ export interface crXTSOptions {
      * @param str 
      */
     onCustomType?: (type: string) => string;
+    /**
+     * 使用缓存的相关信息
+     */
+    cache?: {
+        /**
+         * 缓存的根路径，可选
+         */
+        root?: string,
+        /**
+         * 版本，可自主控制版本变化
+         */
+        version?: string;
+    },
 }
 
 type _crJsonRes = {
     err?: string;
     json?: any;
+}
+
+type _crTableRes = {
+    tableClass?: crXTSTableClass,
+    tableResult?: crXTSTableResult,
+    err?:string;
 }
 
 /**
@@ -180,10 +200,17 @@ export class crXlsx2TS {
             return crXlsx2TS._transform_normal_type(srcType);
         };
         typeof options.excelSheet !== 'number' && (options.excelSheet = 0);
+        let cache: crCache;
+        if (options.cache) {
+            options.cache.root && (crCache.cacheRoot = options.cache.root);
+            options.cache.version || (options.cache.version = '0.0.1');
+            cache = crCache.domain('crXlsx2TS', options.cache.version);
+        }
+
         let json: Record<string, any> = options.outJson ? {} : undefined;
         let typing: Record<string, string> = options.outTyping ? {} : undefined;
         for (let excelPath of options.excel) {
-            let tres = crXlsx2TS._transform_table(excelPath, options);
+            let tres = crXlsx2TS._transform_table(excelPath, options, cache);
             if (tres.err) {
                 return tres.err;
             }
@@ -224,7 +251,17 @@ export class crXlsx2TS {
         }
         return undefined;
     }
-    private static _transform_table(excelPath: string, options: crXTSOptions) {
+    private static _transform_table(excelPath: string, options: crXTSOptions, cache?:crCache) : _crTableRes {
+        if (cache) {
+            let cacheContent = cache.tryGetCache(excelPath);
+            if (typeof cacheContent === 'string') {
+                let res = crUtil.parseJson(cacheContent) as _crTableRes;
+                if (res) {
+                    console.log('read excel from cache: ', excelPath);
+                    return res;
+                }
+            }
+        }
         let excel = xlsx.parse(excelPath);
         if (!excel) {
             return { err: `xlsx.parse failed: ${excelPath}` };
@@ -253,7 +290,7 @@ export class crXlsx2TS {
             json: undefined,
             typing: undefined,
         };
-        if (options.outJson || options.onTable) {
+        if (options.outJson || options.onTable || cache) {
             //process json
             let res: _crJsonRes = {};
             crXlsx2TS._generate_table_json(tableClass, sheetData, options, res);
@@ -262,14 +299,18 @@ export class crXlsx2TS {
             }
             result.json = res.json;
         }
-        if (options.outTyping || options.onTable) {
+        if (options.outTyping || options.onTable || cache) {
             //process typing
             result.typing = crXlsx2TS._generate_table_typing(tableClass, options);
         }
-        return {
+        let res = {
             tableClass: tableClass,
             tableResult: result,
         };
+        if (cache) {
+            cache.updateCache(excelPath, JSON.stringify(res));
+        }
+        return res;
     }
 
     private static _generate_table_typing(tableClass: crXTSTableClass, options: crXTSOptions) {
