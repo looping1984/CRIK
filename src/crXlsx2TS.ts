@@ -154,6 +154,10 @@ export interface crXTSOptions {
          */
         version?: string;
     },
+    /**
+     * 是否输出详细信息，默认false
+     */
+    detailLog?: boolean;
 }
 
 type _crJsonRes = {
@@ -162,6 +166,7 @@ type _crJsonRes = {
 }
 
 type _crTableRes = {
+    originalTableClass?: crXTSTableClass,
     tableClass?: crXTSTableClass,
     tableResult?: crXTSTableResult,
     err?: string;
@@ -257,7 +262,9 @@ export class crXlsx2TS {
             if (typeof cacheContent === 'string') {
                 let res = crUtil.parseJson(cacheContent) as _crTableRes;
                 if (res) {
-                    console.log('read excel from cache: ', excelPath);
+                    options.detailLog && console.log('read excel from cache: ', excelPath);
+                    options.onBeforeTable && options.onBeforeTable(excelPath, res.originalTableClass);
+                    options.onTable && options.onTable(excelPath, res.tableClass, res.tableResult);
                     return res;
                 }
             }
@@ -279,6 +286,7 @@ export class crXlsx2TS {
             itemClass: `${tableName}TableItem`,
             members: [],
         };
+        const originalTableClass = crUtil.deepClone(tableClass);
         const m_res = crXlsx2TS._parse_member_defines(tableClass, sheetData, options);
         if (m_res.err) {
             return {
@@ -303,7 +311,9 @@ export class crXlsx2TS {
             //process typing
             result.typing = crXlsx2TS._generate_table_typing(tableClass, options);
         }
-        let res = {
+        options.onTable && options.onTable(excelPath, tableClass, result);
+        let res: _crTableRes = {
+            originalTableClass: originalTableClass,
             tableClass: tableClass,
             tableResult: result,
         };
