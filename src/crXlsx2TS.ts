@@ -1,10 +1,10 @@
+import { js_beautify } from "js-beautify";
 import * as xlsx from "node-xlsx";
+import { crCache } from "./crCache";
+import { crFS } from "./crFS";
 import { crPath } from "./crPath";
 import { DeepReadonly, crUtil, is_null, not_null } from "./crUtil";
 import { crXlsx2Json } from "./crXlsx2Json";
-import { crFS } from "./crFS";
-import { js_beautify } from "js-beautify";
-import { crCache } from "crCache";
 
 export type crXTSPrimitiveType = 'string' | 'number' | 'boolean' | 'any' | 'error';
 export type crXTSMemberType = crXTSPrimitiveType | ({ fd: string, type: crXTSPrimitiveType }[]);
@@ -164,7 +164,7 @@ type _crJsonRes = {
 type _crTableRes = {
     tableClass?: crXTSTableClass,
     tableResult?: crXTSTableResult,
-    err?:string;
+    err?: string;
 }
 
 /**
@@ -251,7 +251,7 @@ export class crXlsx2TS {
         }
         return undefined;
     }
-    private static _transform_table(excelPath: string, options: crXTSOptions, cache?:crCache) : _crTableRes {
+    private static _transform_table(excelPath: string, options: crXTSOptions, cache?: crCache): _crTableRes {
         if (cache) {
             let cacheContent = cache.tryGetCache(excelPath);
             if (typeof cacheContent === 'string') {
