@@ -3,11 +3,11 @@ import * as xlsx from "node-xlsx";
 import { crCache } from "./crCache";
 import { crFS } from "./crFS";
 import { crPath } from "./crPath";
-import { DeepReadonly, crUtil, is_null, not_null } from "./crUtil";
+import { DeepReadonly, crUtil, not_null } from "./crUtil";
 import { crXlsx2Json } from "./crXlsx2Json";
 
 export type crXTSPrimitiveType = 'string' | 'number' | 'boolean' | 'any' | 'error';
-export type crXTSMemberType = crXTSPrimitiveType | ({ fd: string, type: crXTSPrimitiveType }[]);
+export type crXTSMemberType = crXTSPrimitiveType | ({ fd: string, type: crXTSPrimitiveType, defVal?: any }[]);
 export type crXTSContainerType = 'primitive' | 'array';
 export type crXTSTableResult = { json: any, typing: string };
 
@@ -337,6 +337,10 @@ export class crXlsx2TS {
         typing = str_replace_all(typing, '{extra}', tableClass.itemExtraBody);
         let body = '';
         for (let m of tableClass.members) {
+            if (m.excluded) {
+                //忽略的
+                continue;
+            }
             let md = str_replace_all(t_item_fd_template, '{fd}', m.name);
             md = str_replace_all(md, '{type}', crXlsx2TS._to_typing(m.element));
             md = str_replace_all(md, '{container}', m.container === 'array' ? '[]' : '');
@@ -419,7 +423,7 @@ export class crXlsx2TS {
             if (member.excluded) {
                 continue;
             }
-            crXlsx2TS._generate_table_item_fd_json(tableClass, member, row[i] || '', rowIdx, i, options, tempCellRes);
+            crXlsx2TS._generate_table_item_fd_json(tableClass, member, row[i], rowIdx, i, options, tempCellRes);
             if (tempCellRes.err) {
                 itemRes.err = tempCellRes.err;
                 return;
@@ -433,7 +437,7 @@ export class crXlsx2TS {
         res.json = undefined;
         if (member.container === 'primitive') {
             //普通元素
-            res.json = crXlsx2TS._parse_cell(member.element, cell, !member.flags.includes('i'));
+            res.json = crXlsx2TS._parse_cell(member.element, cell, !member.flags.includes('i'), false);
         } else if (member.container === 'array') {
             //数组
             if (not_null(cell) && (cell = cell.toString().trim())) {
@@ -450,7 +454,7 @@ export class crXlsx2TS {
                     if (!c) {
                         continue;
                     }
-                    res.json.push(crXlsx2TS._parse_cell(member.element, c, false));
+                    res.json.push(crXlsx2TS._parse_cell(member.element, c, false, true));
                 }
             }
             !res.json && member.flags.includes('i') && (res.json = []);
@@ -459,13 +463,12 @@ export class crXlsx2TS {
             res.err = `未知字段容器类型：${member.container}. [${rowIdx}][${cellIdx}]${tableClass.filePath}`;
         }
     }
-    private static _parse_cell(type: crXTSMemberType, cell: any, optional: boolean) {
+    private static _parse_cell(type: crXTSMemberType, cell: any, optional: boolean, inArray: boolean) {
         if (typeof type === 'string') {
             return crXlsx2TS._parse_primitive_cell(type, cell);
         }
-        cell || (cell = '');
-        cell = cell.toString().trim();
-        if (!cell && optional) {
+        const content: string = (cell ?? '').toString().trim();
+        if (!content && optional) {
             return undefined;
         }
         let obj: Record<string, any> = {};
@@ -473,27 +476,27 @@ export class crXlsx2TS {
         for (let i = 0; i < type.length; ++i) {
             const c = type[i].type;
             if (c === 'string' || c === 'any') {
-                spliter = /[|]/;
+                spliter = inArray ? /[,;]/ : /[|]/;
                 break;
             }
         }
         spliter || (spliter = /[,;|\s]/);
-        const tuples = cell.split(spliter);
+        const tuples = content.split(spliter);
         for (let i = 0; i < type.length; ++i) {
             const c = type[i];
-            obj[c.fd] = crXlsx2TS._parse_primitive_cell(c.type, tuples[i]);
+            obj[c.fd] = crXlsx2TS._parse_primitive_cell(c.type, tuples[i], c.defVal);
         }
         return obj;
     }
-    private static _parse_primitive_cell(type: crXTSPrimitiveType, cell: any) {
-        is_null(cell) && (cell = '');
+    private static _parse_primitive_cell(type: crXTSPrimitiveType, cell: any, defVal?: any) {
+        cell = cell ?? defVal ?? '';
         if (type === 'string') {
             return cell.toString();
         }
         typeof cell === 'string' && (cell = cell.trim());
         if (type === 'boolean') {
             if (typeof cell === 'string') {
-                cell = cell.trim().toLowerCase();
+                cell = cell.toLowerCase();
                 return !!(cell && cell !== 'false' && cell !== '0');
             } else {
                 return !!cell;
@@ -566,25 +569,27 @@ export class crXlsx2TS {
             }
         }
         str = (options.onCustomType || crXlsx2TS._transform_normal_type)(str);
-        const words = str.split(/[^\w]+/);
-        if (words.length % 2) {
-            return {
-                err: `error member type: ${str}`,
-            };
-        }
+        const fdstrlist = str.split(/[^\w\:]+/);
         type = [];
-        let i = 0;
-        while (i < words.length) {
-            const fd = words[i++];
-            const fdtype = crXlsx2TS._parse_primitive_type(words[i++]);
-            if (fdtype === 'error') {
+        for (let i = 0; i < fdstrlist.length; ++i) {
+            const parts = fdstrlist[i].split(':');
+            const fdName = parts[0]?.trim();
+            if (!fdName) {
                 return {
-                    err: `error member type: ${str}`,
+                    err: `error member type(0): ${str}`,
                 };
             }
+            const fdType = crXlsx2TS._parse_primitive_type(parts[1]);
+            if (fdType === 'error') {
+                return {
+                    err: `error member type(1): ${str} - ${fdstrlist[i]} - ${parts[1]}`,
+                };
+            }
+            const fdDefVal = parts[2]?.trim();
             type.push({
-                fd: fd,
-                type: fdtype,
+                fd: fdName,
+                type: fdType,
+                defVal: fdDefVal,
             });
         }
         return {
